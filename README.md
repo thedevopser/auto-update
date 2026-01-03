@@ -5,6 +5,7 @@ Script Python automatisé pour la mise à jour des images Docker locales avec in
 ## Fonctionnalités
 
 - **Liste automatique** de toutes les images Docker locales
+- **Filtrage intelligent** : ignore automatiquement les images buildées localement (sans registry)
 - **Mise à jour intelligente** avec vérification des digests
 - **Interface graphique** dans le terminal avec barres de progression
 - **Résumé détaillé** des opérations effectuées
@@ -54,7 +55,7 @@ Le script `setup.sh` va :
 ### Exécution manuelle
 
 ```bash
-# Exécution standard
+# Exécution standard (ignore les builds locaux)
 ./run-update.sh
 
 # Mode simulation (aucune modification)
@@ -62,6 +63,9 @@ Le script `setup.sh` va :
 
 # Exclure certains tags
 ./run-update.sh --exclude-tag latest --exclude-tag dev
+
+# Inclure aussi les images buildées localement
+./run-update.sh --include-local-builds
 
 # Afficher l'aide
 ./run-update.sh --help
@@ -131,10 +135,11 @@ tail -f ~/.docker-update/logs/cron.log
 
 ```
 Options:
-  -h, --help            Afficher l'aide
-  --dry-run             Mode simulation (aucune modification réelle)
-  --exclude-tag TAG     Tags à exclure (peut être répété)
-  --version             Afficher la version
+  -h, --help                Afficher l'aide
+  --dry-run                 Mode simulation (aucune modification réelle)
+  --exclude-tag TAG         Tags à exclure (peut être répété)
+  --include-local-builds    Inclure les images buildées localement (par défaut: exclues)
+  --version                 Afficher la version
 ```
 
 ## Fonctionnement détaillé
@@ -146,27 +151,49 @@ Le script liste toutes les images Docker locales :
 docker images --format "{{json .}}"
 ```
 
-### 2. Mise à jour
+### 2. Filtrage des images locales
 
-Pour chaque image :
+**Par défaut, les images buildées localement sont ignorées.**
+
+Le script détecte automatiquement les images locales via :
+- Absence de `RepoDigests` (images sans registry n'ont pas de digest)
+- Repositories localhost ou 127.0.0.1
+
+**Exemples d'images ignorées :**
+- `mon-projet:latest` (build local sans registry)
+- `localhost:5000/app:v1` (registry local)
+- `projet/backend:dev` (build local)
+
+**Exemples d'images mises à jour :**
+- `nginx:latest` (Docker Hub)
+- `docker.io/library/postgres:15` (Docker Hub explicite)
+- `myregistry.com/app:prod` (registry privé)
+- `ghcr.io/user/image:v1` (GitHub Container Registry)
+
+Pour inclure les images locales, utilisez `--include-local-builds`.
+
+### 3. Mise à jour
+
+Pour chaque image du registry :
 - Récupération du digest actuel
 - Pull de la nouvelle version
 - Comparaison des digests
 - Marquage comme "mise à jour" ou "déjà à jour"
 
-### 3. Nettoyage
+### 4. Nettoyage
 
 Suppression automatique des images orphelines :
 ```bash
 docker image prune -f
 ```
 
-### 4. Rapport
+### 5. Rapport
 
 Affichage d'un résumé complet avec :
 - Nombre total d'images
 - Images mises à jour
 - Images déjà à jour
+- Images locales ignorées
 - Images en échec
 - Temps d'exécution
 - Chemin des logs

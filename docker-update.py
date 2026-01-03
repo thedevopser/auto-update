@@ -40,17 +40,21 @@ console = Console()
 class DockerImageUpdater:
     """Gestionnaire de mise à jour des images Docker"""
 
-    def __init__(self, dry_run: bool = False, exclude_tags: Optional[List[str]] = None):
+    def __init__(self, dry_run: bool = False, exclude_tags: Optional[List[str]] = None,
+                 skip_local_builds: bool = True):
         self.dry_run = dry_run
         self.exclude_tags = exclude_tags or ['<none>']
+        self.skip_local_builds = skip_local_builds
         self.updated_images = []
         self.failed_images = []
         self.unchanged_images = []
+        self.skipped_local_images = []
         self.stats = {
             'total': 0,
             'updated': 0,
             'failed': 0,
             'unchanged': 0,
+            'skipped_local': 0,
             'start_time': datetime.now()
         }
 
@@ -67,6 +71,77 @@ class DockerImageUpdater:
         except subprocess.CalledProcessError as e:
             logger.error(f"Erreur lors de l'exécution de {' '.join(cmd)}: {e.stderr}")
             return None
+
+    def is_local_build(self, repository: str, tag: str) -> bool:
+        """
+        Détecte si une image est buildée localement (pas de registry).
+
+        Stratégie:
+        1. Si pas de RepoDigests, c'est local
+        2. Si repository commence par localhost, c'est local
+        3. Si RepoDigest ne contient pas de nom de domaine (avec '.'), c'est local
+        4. Images Docker Hub officielles: repository sans '/' OU avec format 'user/image' qui existe sur Docker Hub
+        """
+        image_name = f"{repository}:{tag}"
+
+        # Vérifier si l'image a un RepoDigests
+        cmd = ["docker", "inspect", "--format={{.RepoDigests}}", image_name]
+        digests = self.run_command(cmd)
+
+        # Si pas de digests ou digests vide [], c'est une image locale
+        if not digests or digests == "[]":
+            logger.info(f"Image {image_name} détectée comme build local (pas de RepoDigests)")
+            return True
+
+        # Si repository commence par localhost ou 127.0.0.1, c'est local
+        if repository.startswith('localhost') or repository.startswith('127.0.0.1'):
+            logger.info(f"Image {image_name} détectée comme build local (localhost registry)")
+            return True
+
+        # Analyser le RepoDigest pour voir s'il contient un nom de domaine
+        # Format attendu pour registry: "registry.com/path/image@sha256:..."
+        # Format local: "image-name@sha256:..." ou "user/image@sha256:..." (sans domaine)
+        if digests and digests != "[]":
+            # Extraire le premier digest (format: [image@sha256:...])
+            digest_content = digests.strip('[]').strip()
+
+            if '@sha256:' in digest_content:
+                # Récupérer la partie avant @sha256
+                digest_prefix = digest_content.split('@sha256:')[0]
+
+                # Vérifier si le prefix contient un '.' (indique un nom de domaine)
+                # Images locales: "docker-wowplanet", "project/app"
+                # Images registry: "docker.io/library/postgres", "ghcr.io/user/app", "index.docker.io/postgres"
+                if '.' not in digest_prefix:
+                    # Pas de domaine, probablement local
+                    # MAIS attention aux images Docker Hub qui n'ont pas de domaine dans le digest
+
+                    # Règle 1: Si le repository contient un '/', c'est probablement Docker Hub (user/image)
+                    # Ex: "portainer/portainer-ce", "axllent/mailpit", "jakzal/phpqa"
+                    if '/' in repository:
+                        logger.debug(f"Image {image_name} considérée comme Docker Hub (format user/image)")
+                        return False
+
+                    # Règle 2: Liste blanche d'images officielles communes (sans domaine mais sur Docker Hub)
+                    common_official_images = [
+                        'nginx', 'postgres', 'redis', 'mysql', 'mongo', 'ubuntu', 'debian',
+                        'alpine', 'python', 'node', 'golang', 'java', 'openjdk', 'httpd',
+                        'memcached', 'rabbitmq', 'elasticsearch', 'mariadb', 'traefik',
+                        'caddy', 'registry', 'vault', 'consul', 'jenkins', 'sonarqube'
+                    ]
+
+                    # Si c'est une image officielle connue, on ne la considère pas comme locale
+                    if repository in common_official_images:
+                        logger.debug(f"Image {image_name} reconnue comme image officielle Docker Hub")
+                        return False
+
+                    # Sinon, c'est probablement une image locale
+                    # Ex: "docker-wowplanet", "mon-projet", "app"
+                    logger.info(f"Image {image_name} détectée comme build local (RepoDigest sans domaine ni /: {digest_prefix})")
+                    return True
+
+        # Par défaut, on considère que l'image vient d'un registry
+        return False
 
     def get_local_images(self) -> List[Dict[str, str]]:
         """Récupère la liste des images Docker locales"""
@@ -217,6 +292,14 @@ class DockerImageUpdater:
                 progress.update(task, description=f"[cyan]Traitement: {image_name[:50]}")
 
                 try:
+                    # Vérifier si c'est une image buildée localement
+                    if self.skip_local_builds and self.is_local_build(image['repository'], image['tag']):
+                        logger.info(f"Image {image_name} ignorée (build local)")
+                        self.skipped_local_images.append(image_name)
+                        self.stats['skipped_local'] += 1
+                        progress.advance(task)
+                        continue
+
                     result = self.update_image(image)
 
                     if result['status'] == 'updated':
@@ -266,6 +349,10 @@ class DockerImageUpdater:
             f"[blue]{self.stats['unchanged']}[/blue]"
         )
         summary_table.add_row(
+            "Images locales ignorées",
+            f"[yellow]{self.stats['skipped_local']}[/yellow]"
+        )
+        summary_table.add_row(
             "Images en échec",
             f"[red]{self.stats['failed']}[/red]"
         )
@@ -302,6 +389,17 @@ class DockerImageUpdater:
 
             console.print(update_table)
 
+        # Détails des images locales ignorées
+        if self.skipped_local_images:
+            console.print()
+            skipped_table = Table(title="Images locales ignorées (builds locaux)", box=box.ROUNDED, style="yellow")
+            skipped_table.add_column("Image", style="yellow")
+
+            for img in self.skipped_local_images:
+                skipped_table.add_row(img)
+
+            console.print(skipped_table)
+
         console.print()
 
         # Message de fin
@@ -320,9 +418,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemples d'utilisation:
-  %(prog)s                          # Mise à jour de toutes les images
-  %(prog)s --dry-run                # Mode simulation
-  %(prog)s --exclude-tag latest     # Exclure les images avec tag 'latest'
+  %(prog)s                             # Mise à jour de toutes les images registry
+  %(prog)s --dry-run                   # Mode simulation
+  %(prog)s --exclude-tag latest        # Exclure les images avec tag 'latest'
+  %(prog)s --include-local-builds      # Inclure aussi les images buildées localement
         """
     )
     parser.add_argument(
@@ -334,6 +433,11 @@ Exemples d'utilisation:
         '--exclude-tag',
         action='append',
         help="Tags à exclure de la mise à jour (peut être répété)"
+    )
+    parser.add_argument(
+        '--include-local-builds',
+        action='store_true',
+        help="Inclure les images buildées localement (par défaut: exclues)"
     )
     parser.add_argument(
         '--version',
@@ -372,7 +476,8 @@ Exemples d'utilisation:
     # Créer l'updater et lancer la mise à jour
     updater = DockerImageUpdater(
         dry_run=args.dry_run,
-        exclude_tags=args.exclude_tag
+        exclude_tags=args.exclude_tag,
+        skip_local_builds=not args.include_local_builds
     )
 
     try:
