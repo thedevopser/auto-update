@@ -1,0 +1,85 @@
+###############################################################################
+# Exemples de configuration Crontab pour Docker Auto-Update
+###############################################################################
+#
+# Format du crontab:
+# * * * * * commande
+# │ │ │ │ │
+# │ │ │ │ └─── Jour de la semaine (0-7, 0 et 7 = dimanche)
+# │ │ │ └───── Mois (1-12)
+# │ │ └─────── Jour du mois (1-31)
+# │ └───────── Heure (0-23)
+# └─────────── Minute (0-59)
+#
+###############################################################################
+
+# Variables d'environnement (à adapter selon votre installation)
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PROJECT_PATH=/home/thedevopser/projects/auto-update
+
+###############################################################################
+# EXEMPLES DE PLANIFICATION
+###############################################################################
+
+# 1. Mise à jour quotidienne à 2h du matin (recommandé pour la production)
+0 2 * * * cd $PROJECT_PATH && ./run-update.sh >> ~/.docker-update/logs/cron.log 2>&1
+
+# 2. Mise à jour toutes les 6 heures
+# 0 */6 * * * cd $PROJECT_PATH && ./run-update.sh >> ~/.docker-update/logs/cron.log 2>&1
+
+# 3. Mise à jour tous les dimanches à minuit
+# 0 0 * * 0 cd $PROJECT_PATH && ./run-update.sh >> ~/.docker-update/logs/cron.log 2>&1
+
+# 4. Mise à jour tous les jours à 3h du matin avec exclusion de certains tags
+# 0 3 * * * cd $PROJECT_PATH && ./run-update.sh --exclude-tag latest --exclude-tag dev >> ~/.docker-update/logs/cron.log 2>&1
+
+# 5. Vérification toutes les heures (en mode dry-run pour monitoring)
+# 0 * * * * cd $PROJECT_PATH && ./run-update.sh --dry-run >> ~/.docker-update/logs/cron-check.log 2>&1
+
+# 6. Mise à jour en semaine uniquement (lundi à vendredi) à 4h du matin
+# 0 4 * * 1-5 cd $PROJECT_PATH && ./run-update.sh >> ~/.docker-update/logs/cron.log 2>&1
+
+# 7. Mise à jour deux fois par jour (6h et 18h)
+# 0 6,18 * * * cd $PROJECT_PATH && ./run-update.sh >> ~/.docker-update/logs/cron.log 2>&1
+
+###############################################################################
+# INSTALLATION
+###############################################################################
+#
+# Pour installer ce crontab:
+#
+# 1. Éditez ce fichier et décommentez la ligne de votre choix
+#
+# 2. Vérifiez que PROJECT_PATH correspond bien à votre installation
+#
+# 3. Chargez la configuration cron:
+#    crontab crontab.example
+#
+#    OU ajoutez manuellement via:
+#    crontab -e
+#    (puis copiez/collez la ligne souhaitée)
+#
+# 4. Vérifiez que le cron est bien installé:
+#    crontab -l
+#
+# 5. Vérifiez les logs:
+#    tail -f ~/.docker-update/logs/cron.log
+#
+###############################################################################
+
+###############################################################################
+# NOTES IMPORTANTES
+###############################################################################
+#
+# - Assurez-vous que l'utilisateur qui exécute le cron a les droits Docker
+# - Les logs sont stockés dans ~/.docker-update/logs/
+# - Le mode dry-run permet de tester sans modifier les images
+# - Adaptez les horaires selon vos besoins et votre charge serveur
+# - En production, privilégiez les heures creuses (nuit/weekend)
+#
+###############################################################################
+
+# Configuration recommandée pour environnement de production:
+# Mise à jour quotidienne à 2h du matin avec logs
+# 0 2 * * * cd /home/thedevopser/projects/auto-update && ./run-update.sh >> ~/.docker-update/logs/cron.log 2>&1

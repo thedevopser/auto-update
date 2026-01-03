@@ -1,0 +1,36 @@
+{
+  "description": "Fichier de configuration pour Docker Auto-Update",
+  "settings": {
+    "dry_run": false,
+    "exclude_tags": [
+      "<none>",
+      "test",
+      "development"
+    ],
+    "cleanup_dangling": true,
+    "log_retention_days": 30
+  },
+  "notifications": {
+    "enabled": false,
+    "email": {
+      "enabled": false,
+      "recipients": [
+        "admin@example.com"
+      ],
+      "smtp_server": "smtp.example.com",
+      "smtp_port": 587
+    },
+    "webhook": {
+      "enabled": false,
+      "url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+    }
+  },
+  "schedule": {
+    "description": "Configuration du scheduling (à utiliser avec cron)",
+    "examples": [
+      "0 2 * * * - Tous les jours à 2h du matin",
+      "0 */6 * * * - Toutes les 6 heures",
+      "0 0 * * 0 - Tous les dimanches à minuit"
+    ]
+  }
+}

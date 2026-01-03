@@ -1,0 +1,3 @@
+# Dépendances pour le script de mise à jour Docker
+# Interface graphique en terminal
+rich>=13.7.0
